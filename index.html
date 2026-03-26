@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cosmic Crust Pizza - Oven Calibration</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+
+        /* CRT Scanline effect */
+        .crt-overlay::before {
+            content: " ";
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), 
+                        linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            z-index: 20;
+            background-size: 100% 4px, 3px 100%;
+            pointer-events: none;
+            opacity: 0.4;
+        }
+
+        .glow-emerald {
+            box-shadow: 0 0 15px rgba(74, 246, 38, 0.2);
+        }
+
+        input[type=range]::-webkit-slider-thumb {
+            appearance: none;
+            height: 24px;
+            width: 24px;
+            border-radius: 50%;
+            background: #f59e0b;
+            cursor: pointer;
+            box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+            border: 2px solid white;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 flex flex-col items-center">
+
+    <!-- Header -->
+    <header class="w-full max-w-4xl flex flex-col md:flex-row justify-between items-center mb-6 border-b border-slate-700 pb-4 gap-4">
+        <div>
+            <h1 class="text-3xl font-bold text-amber-400 flex items-center gap-3">
+                <span>🚀</span> Cosmic Crust Pizzaria
+            </h1>
+            <p class="text-slate-400 mt-1">Orbital Oven Calibration System v1.1 (HTML)</p>
+        </div>
+        <div class="bg-slate-800 p-3 rounded-lg border border-slate-600 min-w-[200px]">
+            <p class="text-xs text-slate-400 uppercase tracking-wider mb-1">Current Order</p>
+            <p class="text-emerald-400 font-bold">Xenospore Base</p>
+            <p id="target-display" class="text-sm text-slate-200">Target: 470°C @ 30s</p>
+        </div>
+    </header>
+
+    <!-- Main Game Interface -->
+    <main class="w-full max-w-4xl bg-black p-4 md:p-6 rounded-xl border-4 border-slate-700 shadow-2xl relative">
+        
+        <!-- Formula Display -->
+        <div class="md:absolute top-8 left-1/2 md:transform md:-translate-x-1/2 bg-slate-900/90 px-6 py-3 rounded-full border border-emerald-500/50 backdrop-blur-sm z-30 mb-4 md:mb-0 text-center shadow-lg">
+            <p class="text-sm md:text-lg font-bold text-emerald-400 tracking-wide whitespace-nowrap">
+                Temp = (Time × <span id="formula-val" class="text-amber-400 bg-amber-400/10 px-2 py-1 rounded">5</span>) + 20°C
+            </p>
+        </div>
+
+        <!-- Oscilloscope Canvas Container -->
+        <div class="bg-[#051105] rounded-lg overflow-hidden border-2 border-slate-800 relative shadow-inner crt-overlay">
+            <canvas id="ovenCanvas" width="800" height="400" class="w-full h-auto block"></canvas>
+        </div>
+
+        <!-- Controls -->
+        <div class="mt-8 bg-slate-800 p-4 md:p-6 rounded-lg border border-slate-700">
+            <div class="flex items-center justify-between mb-4">
+                <label class="text-lg md:text-xl font-bold flex items-center gap-2 text-amber-400">
+                    <span>⚡</span> BakeBoost Control
+                </label>
+                <span id="bakeboost-display" class="text-2xl font-bold bg-slate-900 px-4 py-2 rounded text-emerald-400 border border-slate-600">
+                    5
+                </span>
+            </div>
+            
+            <input
+                type="range"
+                id="bakeBoostSlider"
+                min="0"
+                max="30"
+                step="1"
+                value="5"
+                class="w-full h-4 bg-slate-900 rounded-lg appearance-none cursor-pointer"
+            />
+            <div class="flex justify-between text-slate-500 text-xs md:text-sm mt-2 font-bold">
+                <span>0 (Minimum)</span>
+                <span>30 (Maximum)</span>
+            </div>
+        </div>
+
+        <!-- Feedback Panel -->
+        <div id="feedback-panel" class="mt-6 p-4 rounded-lg text-center transition-all duration-300 bg-slate-800 border-2 border-slate-700">
+            <h2 id="feedback-status" class="text-xl font-bold text-slate-300 mb-1">Calibration Required</h2>
+            <p id="feedback-msg" class="text-slate-400">
+                Current temp at 30s: <span class="text-amber-400 font-bold">170°C</span> (Too Cold!)
+            </p>
+        </div>
+
+    </main>
+
+    <script>
+        // Constants & State
+        const canvas = document.getElementById('ovenCanvas');
+        const ctx = canvas.getContext('2d');
+        const slider = document.getElementById('bakeBoostSlider');
+        const bakeBoostDisplay = document.getElementById('bakeboost-display');
+        const formulaVal = document.getElementById('formula-val');
+        const feedbackPanel = document.getElementById('feedback-panel');
+        const feedbackStatus = document.getElementById('feedback-status');
+        const feedbackMsg = document.getElementById('feedback-msg');
+
+        let bakeBoost = 5;
+        const targetTemp = 470;
+        const targetTime = 30;
+        const startTemp = 20;
+
+        // Initialization
+        function init() {
+            slider.addEventListener('input', (e) => {
+                bakeBoost = parseInt(e.target.value);
+                updateUI();
+                draw();
+            });
+
+            // Handle window resize for canvas scaling
+            window.addEventListener('resize', draw);
+            
+            updateUI();
+            draw();
+        }
+
+        function updateUI() {
+            bakeBoostDisplay.innerText = bakeBoost;
+            formulaVal.innerText = bakeBoost;
+
+            const currentTempAtTarget = (targetTime * bakeBoost) + startTemp;
+            const isPerfect = currentTempAtTarget === targetTemp;
+
+            if (isPerfect) {
+                feedbackPanel.className = "mt-6 p-6 rounded-lg text-center transition-all duration-300 bg-emerald-900/50 border-2 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.3)] animate-pulse";
+                feedbackStatus.innerHTML = "<span class='text-2xl'>TARGET LOCKED!</span>";
+                feedbackStatus.className = "font-bold text-emerald-400 mb-2";
+                feedbackMsg.innerHTML = "Perfect calibration! <button class='ml-4 bg-emerald-500 text-black px-4 py-1 rounded-full text-sm hover:bg-white transition-colors'>BAKE PIZZA</button>";
+                feedbackMsg.className = "text-emerald-200";
+            } else {
+                feedbackPanel.className = "mt-6 p-4 rounded-lg text-center transition-all duration-300 bg-slate-800 border-2 border-slate-700";
+                feedbackStatus.innerText = "Calibration Required";
+                feedbackStatus.className = "text-xl font-bold text-slate-300 mb-1";
+                const diff = currentTempAtTarget > targetTemp ? ' (Too Hot!)' : ' (Too Cold!)';
+                feedbackMsg.innerHTML = `Current temp at 30s: <span class="text-amber-400 font-bold">${currentTempAtTarget}°C</span> ${diff}`;
+                feedbackMsg.className = "text-slate-400";
+            }
+        }
+
+        function draw() {
+            const width = canvas.width;
+            const height = canvas.height;
+
+            // Clear canvas
+            ctx.fillStyle = '#051105';
+            ctx.fillRect(0, 0, width, height);
+
+            // Grid System
+            ctx.strokeStyle = '#1a401a';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            
+            for (let x = 0; x <= 60; x += 10) {
+                const cx = (x / 60) * width;
+                ctx.moveTo(cx, 0);
+                ctx.lineTo(cx, height);
+            }
+            for (let y = 0; y <= 1000; y += 100) {
+                const cy = height - ((y / 1000) * height);
+                ctx.moveTo(0, cy);
+                ctx.lineTo(width, cy);
+            }
+            ctx.stroke();
+
+            // Grid Labels
+            ctx.fillStyle = 'rgba(74, 246, 38, 0.6)';
+            ctx.font = '10px "JetBrains Mono"';
+            
+            // X-axis
+            ctx.textAlign = 'center';
+            for (let x = 0; x <= 60; x += 10) {
+                const cx = (x / 60) * width;
+                const posX = x === 0 ? cx + 10 : (x === 60 ? cx - 15 : cx);
+                ctx.fillText(x.toString(), posX, height - 8);
+            }
+
+            // Y-axis
+            ctx.textAlign = 'left';
+            for (let y = 100; y <= 1000; y += 100) {
+                const cy = height - ((y / 1000) * height);
+                ctx.fillText(y.toString(), 5, cy + 4);
+            }
+
+            // Axis Titles
+            ctx.fillStyle = '#4af626';
+            ctx.font = '12px "JetBrains Mono"';
+            ctx.fillText('Temp (°C)', 40, 25);
+            ctx.textAlign = 'right';
+            ctx.fillText('Time (s)', width - 10, height - 25);
+
+            // Target Point
+            const currentTempAtTarget = (targetTime * bakeBoost) + startTemp;
+            const isPerfect = currentTempAtTarget === targetTemp;
+            const targetX = (targetTime / 60) * width;
+            const targetY = height - ((targetTemp / 1000) * height);
+
+            // 30s Vertical Marker
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(targetX, 0);
+            ctx.lineTo(targetX, height);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw Target Circle
+            ctx.beginPath();
+            ctx.arc(targetX, targetY, 8, 0, Math.PI * 2);
+            ctx.fillStyle = isPerfect ? '#fff' : '#ff003c';
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = isPerfect ? '#fff' : '#ff003c';
+            ctx.fill();
+            ctx.strokeStyle = isPerfect ? '#fff' : '#ff003c';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            
+            // Crosshair
+            ctx.beginPath();
+            ctx.moveTo(targetX - 15, targetY); ctx.lineTo(targetX + 15, targetY);
+            ctx.moveTo(targetX, targetY - 15); ctx.lineTo(targetX, targetY + 15);
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // Main Oven Temperature Graph
+            ctx.beginPath();
+            ctx.strokeStyle = '#4af626';
+            ctx.lineWidth = 3;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = '#4af626';
+
+            for (let x = 0; x <= 60; x++) {
+                const y = (x * bakeBoost) + startTemp;
+                const cx = (x / 60) * width;
+                const cy = height - ((y / 1000) * height);
+                if (x === 0) ctx.moveTo(cx, cy);
+                else ctx.lineTo(cx, cy);
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>
